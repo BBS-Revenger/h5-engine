@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>模板详情 · 拾光影像</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top"><a class="back" href="index.html">‹ 返回列表</a></header>
+<main id="app">
+  <div class="hero"><div class="skel" style="margin:0;aspect-ratio:2/1;height:auto"></div></div>
+  <div class="skel" style="height:18px;width:55%"></div>
+  <div class="skel" style="height:12px;width:82%"></div>
+</main>
+<div class="foot"><button class="btn" id="footBtn" disabled>加载中…</button></div>
+
+<!-- REAL_API=false 时的提交报文预览弹窗 -->
+<div id="modal" class="modal" hidden>
+  <div class="modal-card">
+    <div class="modal-head"><b>提交报文预览</b><button id="mClose" type="button">×</button></div>
+    <p class="modal-sub">当前 <code>REAL_API = false</code>（后台未接入），以下报文本应 POST 到
+      <code id="mApi"></code>。后台就绪后在 app.js 中把 REAL_API 改为 true。</p>
+    <pre id="mBody"></pre>
+    <div class="modal-foot"><button class="btn ghost" id="mCopy" type="button">复制完整报文</button></div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script src="detail.js"></script>
+</body>
+</html>
