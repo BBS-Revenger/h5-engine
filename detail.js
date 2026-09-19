@@ -132,7 +132,7 @@
       console.warn('[engine] 跳过未知控件类型:', spec.type, 'key =', spec.key);  /* §5 版本兼容 */
       return null;
     }
-    c.spec = spec; c.i = i;
+    c.spec = spec; c.i = i; c.el = el;
     return c;
   }
 
