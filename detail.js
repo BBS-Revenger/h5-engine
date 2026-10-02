@@ -4,7 +4,7 @@
 
   const app = document.getElementById('app');
   const footBtn = document.getElementById('footBtn');
-  const MIME = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' };
+  const MIME = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', mp4: 'video/mp4', webm: 'video/webm' };
   const controls = [];
   let tpl = null;
   let currentTask = sessionStorage.getItem('task:' + location.search) || null;
@@ -59,7 +59,7 @@
     footBtn.innerHTML = currentTask ? '<span>继续查询上次任务</span>' : '<span>开始生成</span>';
   }
 
-  /* 3. 控件解释器（§4.3）：image / text / choice，未知 type 跳过不报错（§5 兼容规则） */
+  /* 3. 控件解释器：image / video / text / choice */
   function buildControl(spec, i) {
     if (!spec || typeof spec !== 'object') return null;
     const label = spec.label || spec.key || ('字段' + i);
@@ -70,7 +70,10 @@
     const tip = spec.tip ? '<p class="tip">' + esc(spec.tip) + '</p>' : '';
     let c = null;
 
-    if (spec.type === 'image') {
+    if (spec.type === 'image' || spec.type === 'video') {
+      const video = spec.type === 'video';
+      const mediaName = video ? '视频' : '图片';
+      const maxMB = Math.min(10, Math.max(1, Number(spec.maxSizeMB) || 10));
       const max = Math.max(1, parseInt(spec.maxCount, 10) || 1);
       const acc = (Array.isArray(spec.accept) && spec.accept.length)
         ? spec.accept.map(s => String(s).toLowerCase().replace(/\./g, '')) : null;
@@ -85,11 +88,11 @@
       function draw() {
         grid.classList.toggle('solo', max === 1);
         grid.innerHTML = st.imgs.map((u, k) =>
-          '<figure><img src="' + u + '" alt="">' +
+          '<figure>' + (video ? '<video controls playsinline preload="metadata" src="' + esc(u) + '"></video>' : '<img src="' + esc(u) + '" alt="">') +
           '<button type="button" class="del" data-i="' + k + '">×</button></figure>').join('') +
           (st.imgs.length >= max ? '' :
             '<button type="button" class="add">' + (st.imgs.length ? '继续添加'
-              : (max > 1 ? '添加图片（最多 ' + max + ' 张）' : '上传图片')) + '</button>');  /* 传满隐藏 + */
+              : (max > 1 ? '添加' + mediaName + '（最多 ' + max + ' 个）' : '上传' + mediaName)) + '</button>');
       }
       grid.addEventListener('click', function (ev) {
         const del = ev.target.closest('.del');
@@ -101,12 +104,13 @@
           if (st.imgs.length >= max) { toast('「' + label + '」最多 ' + max + ' 张'); break; }
           const ext = (f.name.split('.').pop() || '').toLowerCase();
           if (acc && acc.indexOf(ext) < 0) { toast('仅支持 ' + acc.join(' / ') + ' 格式'); continue; }
-          if (f.size > 10 * 1024 * 1024) { toast('「' + f.name + '」超过 10MB'); continue; }
-          const dataUrl = await new Promise(res => {
+          if (f.size > maxMB * 1024 * 1024) { toast('「' + f.name + '」超过 ' + maxMB + 'MB'); continue; }
+          let dataUrl = await new Promise(res => {
             const r = new FileReader();
             r.onload = () => res(r.result); r.onerror = () => res(null);
             r.readAsDataURL(f);      /* 一期方案：直接转 base64（§4.4） */
           });
+          if (dataUrl && video && !f.type && MIME[ext]) dataUrl = dataUrl.replace(/^data:[^;]*;/, 'data:' + MIME[ext] + ';');
           if (dataUrl) st.imgs.push(dataUrl);
         }
         file.value = ''; draw();
@@ -245,7 +249,7 @@
         const state = data.data && data.data.status;
         if (state === 'FAILED' || state === 'CANCEL' || state === 'CANCELED') terminalError = data.data.message || '生成失败';
         if (state === 'SUCCESS') out = getByPath(data, cfg.urlField || 'data.url');
-        if (state === 'SUCCESS' && !out) terminalError = '任务完成，但没有返回图片';
+        if (state === 'SUCCESS' && !out) terminalError = '任务完成，但没有返回结果';
         loading.textContent = state === 'QUEUED' ? '任务排队中，请稍候…' : '生成中，请稍候…';
       } catch (e) {
         if (++failures >= 3) throw new Error('连续查询失败：' + e.message + '。可继续查询上次任务');
