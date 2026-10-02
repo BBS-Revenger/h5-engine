@@ -4,11 +4,24 @@
 /* ★ 把这里改成你自己的 Pull Zone 域名（Bunny 创建 Pull Zone 后生成）
    数组预留多源 fallback 能力，主源失败自动试下一个 */
 const MODEL_BASES = [
+  'model',
   'https://h5-model-cdn.b-cdn.net/model'
 ];
 
 /* 后台 API 接好后改为 true：提交将真实 POST submit.api 并按 result 轮询 */
 const REAL_API = false;
+
+// 同源 Bunny 后端；第三方密钥只保存在后端 Secrets。
+async function apiFetch(path, options) {
+  const headers = new Headers((options && options.headers) || {});
+  const token = document.getElementById('testToken');
+  if (token) {
+    if (!token.value.trim()) throw new Error('请先填写测试口令');
+    headers.set('Authorization', 'Bearer ' + token.value.trim());
+    sessionStorage.setItem('edge_test_token', token.value.trim());
+  }
+  return fetch(path, Object.assign({}, options, { headers, signal: AbortSignal.timeout(60000) }));
+}
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
