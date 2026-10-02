@@ -7,6 +7,7 @@
   const MIME = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' };
   const controls = [];
   let tpl = null;
+  let currentTask = sessionStorage.getItem('task:' + location.search) || null;
 
   function renderError(title, html, retry) {
     app.innerHTML = '<div class="err"><h2>' + esc(title) + '</h2><p>' + html + '</p>' +
@@ -42,12 +43,20 @@
       '<div class="form" id="form"></div>';
 
     const form = document.getElementById('form');
+    if (tpl.submit && tpl.submit.real && tpl.submit.auth === 'test-token') {
+      const auth = document.createElement('section');
+      auth.className = 'ctrl test-auth';
+      auth.innerHTML = '<label for="testToken">测试口令</label><input id="testToken" type="password" autocomplete="off" placeholder="填写测试口令">' +
+        '<p class="tip">内部联调使用，生成会消耗 RunningHub 余额。</p>';
+      form.appendChild(auth);
+      document.getElementById('testToken').value = sessionStorage.getItem('edge_test_token') || '';
+    }
     tpl.inputs.forEach(function (spec, i) {          /* 按 inputs 顺序渲染 */
       const c = buildControl(spec, i);
       if (c) { form.appendChild(c.el); controls.push(c); }   /* 未知类型已在内部跳过 */
     });
     footBtn.disabled = false;
-    footBtn.innerHTML = '<span>开始生成</span>';
+    footBtn.innerHTML = currentTask ? '<span>继续查询上次任务</span>' : '<span>开始生成</span>';
   }
 
   /* 3. 控件解释器（§4.3）：image / text / choice，未知 type 跳过不报错（§5 兼容规则） */
@@ -140,6 +149,11 @@
   footBtn.addEventListener('click', onSubmit);
 
   async function onSubmit() {
+    if (currentTask) {
+      footBtn.disabled = true;
+      try { await runPoll(currentTask); } catch (e) { restoreForm(); toast(e.message); }
+      return;
+    }
     for (const ct of controls) {                       /* 逐项校验 required */
       const err = ct.validate();
       if (err) {
@@ -156,16 +170,18 @@
     footBtn.disabled = true;
     footBtn.innerHTML = '<span class="spin"></span>提交中…';
     try {
-      if (!REAL_API) {                                 /* 未接后台：弹窗展示报文，验证契约 */
+      if (!REAL_API && !(tpl.submit && tpl.submit.real)) {
         showPayload((tpl.submit && tpl.submit.api) || '/api/ai/create', body);
         footBtn.disabled = false; footBtn.innerHTML = '<span>开始生成</span>';
         return;
       }
       const taskId = await createTask(body);
+      currentTask = taskId;
+      sessionStorage.setItem('task:' + location.search, taskId);
       await runPoll(taskId);
     } catch (e) {
       toast('提交失败：' + e.message);                 /* 失败弹错，按钮恢复即可重试 */
-      footBtn.disabled = false; footBtn.innerHTML = '<span>开始生成</span>';
+      restoreForm();
     }
   }
 
@@ -190,7 +206,7 @@
 
   async function createTask(body) {
     const cfg = tpl.submit || {};
-    const res = await fetch(cfg.api, {
+    const res = await apiFetch(cfg.api, {
       method: cfg.method || 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
@@ -209,21 +225,39 @@
       toast('已提交（该模板未配置 result 轮询）', 'ok'); return;
     }
     const form = document.getElementById('form');
-    form.innerHTML = '<div class="loading">生成中，请稍候…</div>';
+    controls.forEach(c => { c.el.hidden = true; });
+    let loading = form.querySelector('.loading');
+    if (!loading) { loading = document.createElement('div'); loading.className = 'loading'; form.appendChild(loading); }
+    loading.textContent = '生成中，请稍候…';
+    footBtn.innerHTML = '<span class="spin"></span>正在生成…';
     const url = String(cfg.queryApi).replace('{{task.id}}', encodeURIComponent(taskId));
+    const started = Date.now();
+    let failures = 0;
     for (;;) {
+      if (Date.now() - started > (cfg.timeout || 900000)) throw new Error('查询超时，可继续查询上次任务');
       let out = null;
+      let terminalError = null;
       try {
-        const res = await fetch(url);
+        const res = await apiFetch(url);
         const data = await res.json();
-        if (res.ok) out = getByPath(data, cfg.urlField || 'data.url');
-      } catch (e) { /* 单次失败忽略，继续轮询 */ }
+        if (!res.ok || data.code !== 0) throw new Error(data.message || ('HTTP ' + res.status));
+        failures = 0;
+        const state = data.data && data.data.status;
+        if (state === 'FAILED' || state === 'CANCEL' || state === 'CANCELED') terminalError = data.data.message || '生成失败';
+        if (state === 'SUCCESS') out = getByPath(data, cfg.urlField || 'data.url');
+        if (state === 'SUCCESS' && !out) terminalError = '任务完成，但没有返回图片';
+        loading.textContent = state === 'QUEUED' ? '任务排队中，请稍候…' : '生成中，请稍候…';
+      } catch (e) {
+        if (++failures >= 3) throw new Error('连续查询失败：' + e.message + '。可继续查询上次任务');
+      }
+      if (terminalError) { clearTask(); throw new Error(terminalError); }
       if (out) { renderResult(out, cfg.display || 'image'); return; }
       await new Promise(r => setTimeout(r, cfg.interval || 2000));
     }
   }
 
   function renderResult(url, display) {
+    clearTask();
     const form = document.getElementById('form');
     form.innerHTML = (display === 'video')
       ? '<div class="result"><video controls playsinline src="' + esc(url) + '"></video></div>'
@@ -232,5 +266,18 @@
       '<div class="result-ops"><a class="btn" href="' + esc(url) + '" download target="_blank" rel="noopener">保存</a>' +
       '<a class="btn ghost" href="index.html">返回列表</a></div>');
     footBtn.style.display = 'none';
+  }
+
+  function clearTask() {
+    currentTask = null;
+    sessionStorage.removeItem('task:' + location.search);
+  }
+  function restoreForm() {
+    const form = document.getElementById('form');
+    const loading = form && form.querySelector('.loading');
+    if (loading) loading.remove();
+    controls.forEach(c => { c.el.hidden = false; });
+    footBtn.disabled = false;
+    footBtn.innerHTML = currentTask ? '<span>继续查询上次任务</span>' : '<span>开始生成</span>';
   }
 })();
