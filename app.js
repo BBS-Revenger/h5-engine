@@ -1,17 +1,13 @@
 /* 引擎公共配置与工具（两页共用） */
 'use strict';
 
-/* ★ 把这里改成你自己的 Pull Zone 域名（Bunny 创建 Pull Zone 后生成）
-   数组预留多源 fallback 能力，主源失败自动试下一个 */
-const MODEL_BASES = [
-  'model',
-  'https://h5-model-cdn.b-cdn.net/model'
-];
+/* 模板 JSON 和封面统一从 Bunny Storage 对应的 CDN 读取。 */
+const MODEL_BASES = ['https://h5-model-cdn.b-cdn.net/model'];
 
 /* 后台 API 接好后改为 true：提交将真实 POST submit.api 并按 result 轮询 */
 const REAL_API = false;
 
-// 同源 Bunny 后端；第三方密钥只保存在后端 Secrets。
+// API 地址由模板 JSON 指定；第三方密钥只保存在 Bunny 后端 Secrets。
 async function apiFetch(path, options) {
   const headers = new Headers((options && options.headers) || {});
   const token = document.getElementById('testToken');
