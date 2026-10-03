@@ -22,6 +22,6 @@
 
     app.innerHTML = '<div class="indexbar"><span>model/index.json</span><b>' + list.length + ' templates</b></div>' +
       '<div class="cards">' + (cards ||
-        '<div class="err"><h2>暂无模板</h2><p>清单为空：向 model/ 添加 JSON 后重跑同步脚本</p></div>') + '</div>';
+        '<div class="err"><h2>暂无模板</h2><p>清单为空：上传模板 JSON，并在 Storage 的 index.json 中添加条目</p></div>') + '</div>';
   }).catch(function (e) { renderError(e.message); });
 })();

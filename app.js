@@ -4,7 +4,8 @@
 /* 模板 JSON 和封面统一从 Bunny Storage 对应的 CDN 读取。 */
 const MODEL_BASES = ['https://h5-model-cdn.b-cdn.net/model'];
 
-/* 后台 API 接好后改为 true：提交将真实 POST submit.api 并按 result 轮询 */
+const ENGINE_VERSION = 2;
+/* 默认预览；具体模板的 submit.real=true 可单独启用真实调用。 */
 const REAL_API = false;
 
 // API 地址由模板 JSON 指定；第三方密钥只保存在 Bunny 后端 Secrets。

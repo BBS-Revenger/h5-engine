@@ -4,7 +4,7 @@
 
   const app = document.getElementById('app');
   const footBtn = document.getElementById('footBtn');
-  const MIME = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', mp4: 'video/mp4', webm: 'video/webm' };
+  const MIME = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', mp4: 'video/mp4', webm: 'video/webm', mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', m4a: 'audio/mp4' };
   const controls = [];
   let tpl = null;
   let currentTask = sessionStorage.getItem('task:' + location.search) || null;
@@ -34,6 +34,18 @@
     if (!t || typeof t !== 'object' || !Array.isArray(t.inputs)) {
       renderError('模板结构无效', '<code>inputs</code> 字段缺失或不是数组'); return;
     }
+    if ((t.minEngineVersion || 1) > (typeof ENGINE_VERSION === 'number' ? ENGINE_VERSION : 1)) {
+      renderError('前端版本需要更新', '请上传最新的 HTML、JS 和 CSS 文件后刷新页面。'); return;
+    }
+    const supported = ['image', 'audio', 'video', 'text', 'choice', 'number', 'boolean'];
+    const seen = new Set();
+    const invalid = t.inputs.some(spec => {
+      if (!spec || !supported.includes(spec.type) || typeof spec.key !== 'string' || !spec.key || seen.has(spec.key)) return true;
+      seen.add(spec.key); return false;
+    });
+    if (invalid) {
+      renderError('模板控件不受支持', '请更新前端文件，并检查 inputs 中的控件类型和字段名称。'); return;
+    }
     tpl = t;
     document.title = (tpl.name || id) + ' · 拾光影像';
 
@@ -53,13 +65,13 @@
     }
     tpl.inputs.forEach(function (spec, i) {          /* 按 inputs 顺序渲染 */
       const c = buildControl(spec, i);
-      if (c) { form.appendChild(c.el); controls.push(c); }   /* 未知类型已在内部跳过 */
+      if (c) { form.appendChild(c.el); controls.push(c); }   /* 模板类型已在初始化时校验 */
     });
     footBtn.disabled = false;
     footBtn.innerHTML = currentTask ? '<span>继续查询上次任务</span>' : '<span>开始生成</span>';
   }
 
-  /* 3. 控件解释器：image / video / text / choice */
+  /* 3. JSON 控件解释器 */
   function buildControl(spec, i) {
     if (!spec || typeof spec !== 'object') return null;
     const label = spec.label || spec.key || ('字段' + i);
@@ -70,13 +82,14 @@
     const tip = spec.tip ? '<p class="tip">' + esc(spec.tip) + '</p>' : '';
     let c = null;
 
-    if (spec.type === 'image' || spec.type === 'video') {
-      const video = spec.type === 'video';
-      const mediaName = video ? '视频' : '图片';
-      const maxMB = Math.min(10, Math.max(1, Number(spec.maxSizeMB) || 10));
-      const max = Math.max(1, parseInt(spec.maxCount, 10) || 1);
+    if (['image', 'audio', 'video'].includes(spec.type)) {
+      const video = spec.type === 'video', audio = spec.type === 'audio';
+      const mediaName = video ? '视频' : audio ? '音频' : '图片';
+      const maxMB = Math.min(10, Number(spec.maxSizeMB) > 0 ? Number(spec.maxSizeMB) : 10);
+      const max = Math.min(20, Math.max(1, parseInt(spec.maxCount, 10) || 1));
       const acc = (Array.isArray(spec.accept) && spec.accept.length)
-        ? spec.accept.map(s => String(s).toLowerCase().replace(/\./g, '')) : null;
+        ? spec.accept.map(s => String(s).toLowerCase().replace(/^\./, ''))
+        : (video ? ['mp4', 'webm'] : audio ? ['mp3', 'wav', 'ogg', 'm4a'] : ['jpg', 'jpeg', 'png', 'webp']);
       el.innerHTML = head +
         '<div class="ugrid"></div>' +
         '<input type="file" hidden ' + (max > 1 ? 'multiple' : '') + '>' + tip;
@@ -88,7 +101,7 @@
       function draw() {
         grid.classList.toggle('solo', max === 1);
         grid.innerHTML = st.imgs.map((u, k) =>
-          '<figure>' + (video ? '<video controls playsinline preload="metadata" src="' + esc(u) + '"></video>' : '<img src="' + esc(u) + '" alt="">') +
+          '<figure class="media-' + spec.type + '">' + (audio ? '<audio controls preload="metadata" src="' + esc(u) + '"></audio>' : video ? '<video controls playsinline preload="metadata" src="' + esc(u) + '"></video>' : '<img src="' + esc(u) + '" alt="">') +
           '<button type="button" class="del" data-i="' + k + '">×</button></figure>').join('') +
           (st.imgs.length >= max ? '' :
             '<button type="button" class="add">' + (st.imgs.length ? '继续添加'
@@ -101,16 +114,21 @@
       });
       file.addEventListener('change', async function () {
         for (const f of file.files) {
-          if (st.imgs.length >= max) { toast('「' + label + '」最多 ' + max + ' 张'); break; }
+          if (st.imgs.length >= max) { toast('「' + label + '」最多 ' + max + ' 个'); break; }
           const ext = (f.name.split('.').pop() || '').toLowerCase();
           if (acc && acc.indexOf(ext) < 0) { toast('仅支持 ' + acc.join(' / ') + ' 格式'); continue; }
+          if (!f.size) { toast('文件为空'); continue; }
           if (f.size > maxMB * 1024 * 1024) { toast('「' + f.name + '」超过 ' + maxMB + 'MB'); continue; }
+          const existingBytes = controls.filter(ct => ['image', 'audio', 'video'].includes(ct.spec.type))
+            .flatMap(ct => ct.value()).reduce((sum, u) => sum + Math.floor((u.split(',')[1] || '').replace(/=+$/, '').length * 3 / 4), 0);
+          if (existingBytes + f.size > 10 * 1024 * 1024) { toast('所有上传文件合计不能超过 10MB'); continue; }
           let dataUrl = await new Promise(res => {
             const r = new FileReader();
             r.onload = () => res(r.result); r.onerror = () => res(null);
             r.readAsDataURL(f);      /* 一期方案：直接转 base64（§4.4） */
           });
-          if (dataUrl && video && !f.type && MIME[ext]) dataUrl = dataUrl.replace(/^data:[^;]*;/, 'data:' + MIME[ext] + ';');
+          // 统一浏览器返回的 MIME 别名；后端仍校验实际文件头。
+          if (dataUrl && MIME[ext]) dataUrl = dataUrl.replace(/^data:[^;]*;/, 'data:' + MIME[ext] + ';');
           if (dataUrl) st.imgs.push(dataUrl);
         }
         file.value = ''; draw();
@@ -120,31 +138,68 @@
 
     } else if (spec.type === 'text') {
       const ml = Math.max(1, parseInt(spec.maxLength, 10) || 500);
-      el.innerHTML = head +
-        '<div class="twrap"><textarea maxlength="' + ml + '" placeholder="' +
-        esc(spec.placeholder || '请输入') + '"></textarea><span class="cnt">0 / ' + ml + '</span></div>' + tip;
-      const ta = el.querySelector('textarea'), cnt = el.querySelector('.cnt');
-      ta.addEventListener('input', () => { cnt.textContent = ta.value.length + ' / ' + ml; });
-      c = { value: () => ta.value.trim(), validate: () => (req && !ta.value.trim()) ? '请填写「' + label + '」' : null };
+      const field = spec.multiline === false ? '<input type="text"' : '<textarea';
+      el.innerHTML = head + '<div class="twrap">' + field + ' maxlength="' + ml + '" placeholder="' +
+        esc(spec.placeholder || '请输入') + '">' + (spec.multiline === false ? '' : '</textarea>') +
+        '<span class="cnt"></span></div>' + tip;
+      const ta = el.querySelector('textarea, input'), cnt = el.querySelector('.cnt');
+      ta.value = spec.default == null ? '' : String(spec.default);
+      const count = () => { cnt.textContent = ta.value.length + ' / ' + ml; };
+      ta.addEventListener('input', count); count();
+      c = { value: () => ta.value, validate: () => req && !ta.value.trim() ? '请填写「' + label + '」' : ta.value.length > ml ? '「' + label + '」文字过长' : null };
+
+    } else if (spec.type === 'number') {
+      const integer = spec.numericType === 'integer';
+      const step = spec.step ?? (integer ? 1 : 'any');
+      el.innerHTML = head + '<input class="numeric" type="number" step="' + esc(step) + '"' +
+        (spec.min != null ? ' min="' + esc(spec.min) + '"' : '') +
+        (spec.max != null ? ' max="' + esc(spec.max) + '"' : '') + '>' + tip;
+      const input = el.querySelector('input');
+      if (spec.default != null) input.value = String(spec.default);
+      c = { value: () => input.value === '' ? null : Number(input.value), validate: () => {
+        if (input.validity.badInput) return '请填写有效数字：' + label;
+        if (input.value === '') return req ? '请填写「' + label + '」' : null;
+        const n = Number(input.value);
+        if (!Number.isFinite(n) || integer && !Number.isSafeInteger(n)) return '「' + label + '」必须是' + (integer ? '整数' : '有效数字');
+        if (spec.min != null && n < spec.min || spec.max != null && n > spec.max) return '「' + label + '」超出允许范围';
+        const steps = (n - (spec.stepBase ?? spec.min ?? 0)) / Number(step);
+        if (step !== 'any' && (!(Number(step) > 0) || Math.abs(steps - Math.round(steps)) > 1e-7 * Math.max(1, Math.abs(steps)))) return '「' + label + '」不符合步长 ' + step;
+        return null;
+      } };
+
+    } else if (spec.type === 'boolean') {
+      if (spec.default != null && typeof spec.default !== 'boolean') throw Error('布尔默认值必须是 true 或 false');
+      el.innerHTML = head + '<label class="switch"><input type="checkbox"><span>' + esc(spec.onLabel || '启用') + '</span></label>' + tip;
+      const input = el.querySelector('input'); input.checked = spec.default === true;
+      c = { value: () => input.checked, validate: () => null };
 
     } else if (spec.type === 'choice') {
       const opts = Array.isArray(spec.options) ? spec.options : [];
-      const def = (spec.default != null) ? spec.default : (opts[0] && opts[0].value);
-      el.innerHTML = head + '<div class="chips" data-v="' + esc(def == null ? '' : def) + '">' +
-        opts.map(o => '<button type="button" class="chip ' + (o.value === def ? 'on' : '') +
-          '" data-v="' + esc(o.value) + '">' + esc(o.label) + '</button>').join('') + '</div>' + tip;
-      const box = el.querySelector('.chips');
-      box.addEventListener('click', function (ev) {
-        const b = ev.target.closest('.chip'); if (!b) return;
-        box.dataset.v = b.dataset.v;
-        box.querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === b));
-      });
-      c = { value: () => box.dataset.v || null, validate: () => (req && !box.dataset.v) ? '请选择「' + label + '」' : null };
+      const def = spec.default ?? (opts[0] && opts[0].value);
+      const optionValue = value => value == null ? '' : String(value);
+      let box;
+      if (spec.presentation === 'select') {
+        el.innerHTML = head + '<select>' + opts.map(o => '<option value="' + esc(o.value) + '">' + esc(o.label) + '</option>').join('') + '</select>' + tip;
+        box = el.querySelector('select'); box.value = optionValue(def);
+      } else {
+        el.innerHTML = head + '<div class="chips" data-v="' + esc(optionValue(def)) + '">' +
+          opts.map(o => '<button type="button" class="chip ' + (optionValue(o.value) === optionValue(def) ? 'on' : '') +
+            '" data-v="' + esc(o.value) + '">' + esc(o.label) + '</button>').join('') + '</div>' + tip;
+        box = el.querySelector('.chips');
+        box.addEventListener('click', function (ev) {
+          const b = ev.target.closest('.chip'); if (!b) return;
+          box.dataset.v = b.dataset.v;
+          box.querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === b));
+        });
+      }
+      const value = () => spec.presentation === 'select' ? box.value : box.dataset.v;
+      c = { value: () => value() === '' ? null : value(), validate: () => {
+        const v = value();
+        return !v && !req ? null : opts.some(o => optionValue(o.value) === v) ? null : '请选择「' + label + '」';
+      } };
 
-    } else {
-      console.warn('[engine] 跳过未知控件类型:', spec.type, 'key =', spec.key);  /* §5 版本兼容 */
-      return null;
-    }
+    } else { return null; }
+    el.querySelectorAll('input, textarea, select').forEach(field => field.setAttribute('aria-label', label));
     c.spec = spec; c.i = i; c.el = el;
     return c;
   }
@@ -169,6 +224,9 @@
     }
     const inputs = {};
     controls.forEach(ct => { inputs[ct.spec.key || ('field' + ct.i)] = ct.value(); });
+    const mediaBytes = controls.filter(ct => ['image', 'audio', 'video'].includes(ct.spec.type))
+      .flatMap(ct => ct.value()).reduce((sum, u) => sum + Math.floor((u.split(',')[1] || '').replace(/=+$/, '').length * 3 / 4), 0);
+    if (mediaBytes > 10 * 1024 * 1024) { toast('所有上传文件合计不能超过 10MB'); return; }
     const body = { template: tpl.id, inputs };         /* 请求体契约（§4.4） */
 
     footBtn.disabled = true;
@@ -248,7 +306,13 @@
         failures = 0;
         const state = data.data && data.data.status;
         if (state === 'FAILED' || state === 'CANCEL' || state === 'CANCELED') terminalError = data.data.message || '生成失败';
-        if (state === 'SUCCESS') out = getByPath(data, cfg.urlField || 'data.url');
+        if (state === 'SUCCESS') {
+          out = Array.isArray(data.data.results) && data.data.results.length ? data.data.results : null;
+          if (!out) {
+            const legacy = getByPath(data, cfg.urlField || 'data.url');
+            if (legacy) out = [{ type: cfg.display || 'image', url: legacy }];
+          }
+        }
         if (state === 'SUCCESS' && !out) terminalError = '任务完成，但没有返回结果';
         loading.textContent = state === 'QUEUED' ? '任务排队中，请稍候…' : '生成中，请稍候…';
       } catch (e) {
@@ -260,15 +324,26 @@
     }
   }
 
-  function renderResult(url, display) {
+  function renderResult(results) {
+    const safeUrl = value => {
+      try { const u = new URL(value); return u.protocol === 'https:' && !u.username && !u.password ? u.href : null; }
+      catch { return null; }
+    };
+    const usable = results.filter(item => item.type === 'text' && typeof item.text === 'string' || safeUrl(item.url));
+    if (!usable.length) { clearTask(); throw Error('结果格式或链接无效'); }
     clearTask();
     const form = document.getElementById('form');
-    form.innerHTML = (display === 'video')
-      ? '<div class="result"><video controls playsinline src="' + esc(url) + '"></video></div>'
-      : '<div class="result"><img src="' + esc(url) + '" alt="生成结果"></div>';
-    form.insertAdjacentHTML('beforeend',
-      '<div class="result-ops"><a class="btn" href="' + esc(url) + '" download target="_blank" rel="noopener">保存</a>' +
-      '<a class="btn ghost" href="index.html">返回列表</a></div>');
+    form.innerHTML = usable.map((item, i) => {
+      const url = safeUrl(item.url);
+      const content = item.type === 'text' && typeof item.text === 'string' ? '<pre class="text-result">' + esc(item.text) + '</pre>'
+        : item.type === 'video' ? '<video controls playsinline src="' + esc(url) + '"></video>'
+        : item.type === 'audio' ? '<audio controls src="' + esc(url) + '"></audio>'
+        : item.type === 'image' ? '<img src="' + esc(url) + '" alt="生成结果">'
+        : '<p>输出文件 ' + (i + 1) + '</p>';
+      return '<div class="result">' + content + '</div>' + (url ?
+        '<div class="result-ops"><a class="btn" href="' + esc(url) + '" download target="_blank" rel="noopener">保存' + (usable.length > 1 ? '结果 ' + (i + 1) : '') + '</a></div>' : '');
+    }).join('');
+    form.insertAdjacentHTML('beforeend', '<div class="result-ops"><a class="btn ghost" href="index.html">返回列表</a></div>');
     footBtn.style.display = 'none';
   }
 

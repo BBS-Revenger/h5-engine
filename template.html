@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>模板详情 · 拾光影像</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=20261003-2">
 </head>
 <body>
 <header class="top"><a class="back" href="index.html">‹ 返回列表</a></header>
@@ -15,18 +15,17 @@
 </main>
 <div class="foot"><button class="btn" id="footBtn" disabled>加载中…</button></div>
 
-<!-- REAL_API=false 时的提交报文预览弹窗 -->
+<!-- 未启用真实 API 的模板展示提交报文预览 -->
 <div id="modal" class="modal" hidden>
   <div class="modal-card">
     <div class="modal-head"><b>提交报文预览</b><button id="mClose" type="button">×</button></div>
-    <p class="modal-sub">当前 <code>REAL_API = false</code>（后台未接入），以下报文本应 POST 到
-      <code id="mApi"></code>。后台就绪后在 app.js 中把 REAL_API 改为 true。</p>
+    <p class="modal-sub">此模板处于预览模式。以下报文将提交到 <code id="mApi"></code>。启用真实调用需要在模板 JSON 中设置 submit.real 并配置后端节点映射。</p>
     <pre id="mBody"></pre>
     <div class="modal-foot"><button class="btn ghost" id="mCopy" type="button">复制完整报文</button></div>
   </div>
 </div>
 
-<script src="app.js"></script>
-<script src="detail.js"></script>
+<script src="app.js?v=20261003-2"></script>
+<script src="detail.js?v=20261003-2"></script>
 </body>
 </html>
